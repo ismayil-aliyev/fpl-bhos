@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FPL Mini-League Dashboard</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js for the graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- PapaParse for reading CSV files easily -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <!-- noUiSlider for the "Video Crop" Gameweek Range Slider -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
+
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .fpl-purple { background-color: #37003C; }
+        .fpl-purple-text { color: #37003C; }
+        .fpl-green { color: #00FF87; }
+        .fpl-green-bg { background-color: #00FF87; }
+        
+        /* Customizing the slider to match FPL theme */
+        .noUi-connect { background-color: #37003C; }
+        .noUi-handle { border-radius: 50%; background: #00FF87; border: 2px solid #37003C; box-shadow: none; cursor: grab; }
+        .noUi-handle:before, .noUi-handle:after { display: none; }
+        .noUi-handle:active { cursor: grabbing; }
+        
+        /* Custom Scrollbar for checkboxes */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #888; }
+    </style>
+</head>
+<body class="min-h-screen pb-12">
+
+    <!-- Header -->
+    <header class="fpl-purple text-white p-5 shadow-lg flex justify-between items-center mb-8">
+        <h1 class="text-2xl font-bold flex items-center gap-3">
+            <span class="text-3xl">🏆</span> FPL Mini-League Dashboard
+        </h1>
+        <div id="loadingStatus" class="fpl-green font-semibold text-sm animate-pulse">
+            Loading Data...
+        </div>
+    </header>
+
+    <!-- Main App Container (Hidden until data loads) -->
+    <main id="appContent" class="max-w-[1400px] mx-auto px-4 grid grid-cols-1 lg:grid-cols-4 gap-6 hidden">
+        
+        <!-- SIDEBAR CONTROLS -->
+        <div class="bg-white p-5 rounded-xl shadow-md border border-gray-200 lg:col-span-1 h-fit">
+            <h2 class="text-lg font-extrabold text-gray-800 mb-5 border-b pb-2">Control Panel</h2>
+            
+            <!-- 1. Metric Selector -->
+            <div class="mb-6">
+                <label class="block text-sm font-bold text-gray-700 mb-2">Select Insight Metric</label>
+                <select id="metricSelect" class="w-full border-2 border-gray-300 rounded-lg p-2.5 text-sm font-medium focus:border-purple-800 focus:ring-0 outline-none transition-colors" onchange="updateChart()">
+                    <option value="MiniLeagueRank">Mini-League Rank</option>
+                    <option value="OR">Overall Rank (Global)</option>
+                    <option value="OP">Total Overall Points</option>
+                    <option value="GWP">Gross Gameweek Points</option>
+                    <option value="NetGWP">Net Gameweek Points (GWP - Transfer Cost)</option>
+                    <option value="PB">Points Left on Bench</option>
+                    <option value="TC">Transfer Cost (Hits)</option>
+                    <option value="Value">Squad Value (£m)</option>
+                </select>
+            </div>
+
+            <!-- 2. Gameweek Range Slider -->
+            <div class="mb-8">
+                <label class="block text-sm font-bold text-gray-700 mb-4 flex justify-between">
+                    <span>Gameweek Range</span>
+                    <span id="sliderValues" class="text-purple-700 font-extrabold">GW 1 - 38</span>
+                </label>
+                <div class="px-2">
+                    <div id="gwSlider"></div>
+                </div>
+            </div>
+
+            <!-- 3. Profile Checkboxes -->
+            <div>
+                <label class="block text-sm font-bold text-gray-700 mb-2 flex justify-between items-end">
+                    <span>Compare Profiles</span>
+                    <span class="text-xs font-normal text-gray-500">(Max 3)</span>
+                </label>
+                
+                <div class="relative mb-2">
+                    <input type="text" id="searchProfiles" placeholder="Search names..." class="w-full text-sm p-2 border border-gray-300 rounded focus:border-purple-500 outline-none" onkeyup="filterCheckboxes()">
+                </div>
+
+                <div id="profileCheckboxes" class="space-y-1 max-h-[300px] overflow-y-auto custom-scroll border border-gray-200 rounded-lg p-2 bg-gray-50">
+                    <!-- Checkboxes injected by JS -->
+                </div>
+            </div>
+            
+        </div>
+
+        <!-- CHART AREA -->
+        <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200 lg:col-span-3 flex flex-col">
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="chartTitle" class="text-xl font-extrabold fpl-purple-text">Mini-League Rank Over Time</h2>
+            </div>
+            
+            <div class="relative flex-grow min-h-[500px] w-full">
+                <canvas id="fplChart"></canvas>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Error State (If running locally without a server) -->
+    <div id="errorState" class="max-w-2xl mx-auto mt-10 bg-red-50 border-l-4 border-red-500 p-6 rounded shadow-md hidden">
+        <h3 class="text-xl font-bold text-red-700 mb-2">Data Loading Error</h3>
+        <p class="text-gray-700 mb-4">Could not load the CSV files. This usually happens if you double-clicked the HTML file directly on your computer.</p>
+        <p class="text-gray-700 font-semibold">How to fix:</p>
+        <ul class="list-disc ml-5 text-gray-700 mb-4">
+            <li>Host this folder on <strong>GitHub Pages</strong>.</li>
+            <li>Or, use VS Code's <strong>"Live Server"</strong> extension to view it locally.</li>
+        </ul>
+        <p class="text-sm text-gray-500 mt-4" id="errorLog"></p>
+    </div>
+
+    <script>
+        // --- DATA STATE ---
+        const RAW_DATA = { history: [], names: {}, squads: [] };
+        const PROCESSED_DATA = {}; // Will hold data grouped by ID
+        const MAX_GW = 38;
+        
+        let chartInstance = null;
+        let rangeSlider = null;
+
+        // Distinct colors for up to 3 lines
+        const LINE_COLORS = ["#37003C", "#00FF87", "#E3004F"];
+
+        // --- 1. INITIALIZATION & DATA FETCHING ---
+        async function initApp() {
+            try {
+                // Fetch the CSVs in parallel
+                const [historyRes, namesRes] = await Promise.all([
+                    fetch('history.csv').then(r => r.text()),
+                    fetch('id-name.csv').then(r => r.text())
+                    // fetch('squads.csv').then(r => r.text()) // Ready for future use
+                ]);
+
+                // Parse Name Mapping (ID -> Name)
+                Papa.parse(namesRes, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        results.data.forEach(row => {
+                            if(row.ID && row.Name) RAW_DATA.names[row.ID.trim()] = row.Name.trim();
+                        });
+                    }
+                });
+
+                // Parse History Data (Using TSV/CSV format auto-detect)
+                Papa.parse(historyRes, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        RAW_DATA.history = results.data;
+                        processData();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Fetch Error:", error);
+                document.getElementById('loadingStatus').style.display = 'none';
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorLog').innerText = error.toString();
+            }
+        }
+
+        // --- 2. DATA PROCESSING & MATH ---
+        function processData() {
+            // Group history by Gameweek to calculate Mini-League Rank
+            const gwGroups = {};
+            
+            RAW_DATA.history.forEach(row => {
+                let gwStr = row['GW'] || row['Gameweek']; // Handle variations
+                if (!gwStr) return;
+                
+                let gwNum = parseInt(gwStr.replace(/\D/g, '')); // "GW38" -> 38
+                let id = row['Profile ID'];
+                let op = parseInt((row['OP'] || '0').replace(/,/g, ''));
+                let tc = parseInt((row['TC'] || '0').replace(/,/g, ''));
+
+                if (!gwGroups[gwNum]) gwGroups[gwNum] = [];
+                gwGroups[gwNum].push({ id: id, OP: op, TC: tc });
+
+                // Initialize Profile dict if not exists
+                if (!PROCESSED_DATA[id]) {
+                    PROCESSED_DATA[id] = {
+                        name: RAW_DATA.names[id] || `Manager ${id}`,
+                        historyByGW: {}
+                    };
+                }
+
+                // Clean and store metrics
+                let gwp = parseInt((row['GWP'] || '0').replace(/,/g, ''));
+                
+                PROCESSED_DATA[id].historyByGW[gwNum] = {
+                    OR: parseInt((row['OR'] || '0').replace(/,/g, '')),
+                    OP: op,
+                    GWP: gwp,
+                    NetGWP: gwp - tc,
+                    PB: parseInt((row['PB'] || '0').replace(/,/g, '')),
+                    TC: tc,
+                    Value: parseFloat((row['£m'] || '0').replace(/,/g, ''))
+                };
+            });
+
+            // Calculate Mini-League Rank per GW
+            Object.keys(gwGroups).forEach(gw => {
+                // Sort by Overall Points (Desc), tie break by Transfer Cost (Asc)
+                gwGroups[gw].sort((a, b) => {
+                    if (b.OP !== a.OP) return b.OP - a.OP;
+                    return a.TC - b.TC;
+                });
+
+                // Assign Rank
+                gwGroups[gw].forEach((player, index) => {
+                    PROCESSED_DATA[player.id].historyByGW[gw].MiniLeagueRank = index + 1;
+                });
+            });
+
+            buildUI();
+        }
+
+        // --- 3. BUILD USER INTERFACE ---
+        function buildUI() {
+            // Hide loading, show app
+            document.getElementById('loadingStatus').style.display = 'none';
+            document.getElementById('appContent').classList.remove('hidden');
+
+            // Build Slider
+            const slider = document.getElementById('gwSlider');
+            noUiSlider.create(slider, {
+                start: [1, MAX_GW],
+                connect: true,
+                step: 1,
+                range: { 'min': 1, 'max': MAX_GW },
+                format: { to: v => Math.round(v), from: v => Math.round(v) }
+            });
+
+            slider.noUiSlider.on('update', function (values) {
+                document.getElementById('sliderValues').innerText = `GW ${values[0]} - ${values[1]}`;
+            });
+
+            slider.noUiSlider.on('change', updateChart); // Only re-render chart when drag finishes
+
+            // Build Checkboxes
+            const cbContainer = document.getElementById('profileCheckboxes');
+            
+            // Sort profiles by Final Gameweek (MAX_GW) MiniLeagueRank to show winners at top
+            const sortedIds = Object.keys(PROCESSED_DATA).sort((a, b) => {
+                const rankA = PROCESSED_DATA[a].historyByGW[MAX_GW]?.MiniLeagueRank || 999;
+                const rankB = PROCESSED_DATA[b].historyByGW[MAX_GW]?.MiniLeagueRank || 999;
+                return rankA - rankB;
+            });
+
+            sortedIds.forEach((id, index) => {
+                const name = PROCESSED_DATA[id].name;
+                const rank = PROCESSED_DATA[id].historyByGW[MAX_GW]?.MiniLeagueRank || '-';
+                
+                // Auto-check the top 2
+                const isChecked = index < 2 ? 'checked' : '';
+
+                cbContainer.innerHTML += `
+                    <label class="profile-label flex items-center p-2 hover:bg-purple-50 rounded cursor-pointer transition-colors border-b border-gray-100 last:border-0" data-name="${name.toLowerCase()}">
+                        <input type="checkbox" value="${id}" class="profile-cb w-4 h-4 text-purple-600 rounded focus:ring-purple-500 mr-3" ${isChecked} onchange="handleCheckboxChange(this)">
+                        <div class="flex-grow flex justify-between items-center">
+                            <span class="text-sm font-semibold text-gray-800">${name}</span>
+                            <span class="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">Rank: ${rank}</span>
+                        </div>
+                    </label>
+                `;
+            });
+
+            updateChart();
+        }
+
+        // Search filter for checkboxes
+        function filterCheckboxes() {
+            const query = document.getElementById('searchProfiles').value.toLowerCase();
+            const labels = document.querySelectorAll('.profile-label');
+            labels.forEach(label => {
+                if (label.dataset.name.includes(query)) {
+                    label.style.display = 'flex';
+                } else {
+                    label.style.display = 'none';
+                }
+            });
+        }
+
+        // Enforce Max 3 selection
+        function handleCheckboxChange(checkbox) {
+            const checkedBoxes = document.querySelectorAll('.profile-cb:checked');
+            if (checkedBoxes.length > 3) {
+                checkbox.checked = false;
+                alert("You can only compare a maximum of 3 profiles at a time for visual clarity.");
+            } else {
+                updateChart();
+            }
+        }
+
+        // --- 4. CHART RENDERING ---
+        function updateChart() {
+            // Get Slider Bounds
+            const sliderVals = document.getElementById('gwSlider').noUiSlider.get();
+            const startGW = parseInt(sliderVals[0]);
+            const endGW = parseInt(sliderVals[1]);
+
+            // Get Metric
+            const metricSelect = document.getElementById('metricSelect');
+            const metricKey = metricSelect.value;
+            const metricLabel = metricSelect.options[metricSelect.selectedIndex].text;
+            
+            document.getElementById('chartTitle').innerText = `${metricLabel} (GW ${startGW}-${endGW})`;
+
+            // Is this a ranking metric? If so, we need to invert the Y-Axis
+            const invertYAxis = (metricKey === 'OR' || metricKey === 'MiniLeagueRank');
+
+            // Get Selected Profiles
+            const selectedBoxes = document.querySelectorAll('.profile-cb:checked');
+            
+            // X-Axis Labels (e.g., ["GW 5", "GW 6", ...])
+            const labels = [];
+            for (let i = startGW; i <= endGW; i++) labels.push(`GW ${i}`);
+
+            // Prepare Datasets
+            const datasets = Array.from(selectedBoxes).map((cb, idx) => {
+                const id = cb.value;
+                const profile = PROCESSED_DATA[id];
+                const color = LINE_COLORS[idx % LINE_COLORS.length];
+
+                // Extract data points within the GW range
+                const dataPoints = [];
+                for (let gw = startGW; gw <= endGW; gw++) {
+                    // Provide null if data doesn't exist for that week
+                    dataPoints.push(profile.historyByGW[gw] ? profile.historyByGW[gw][metricKey] : null);
+                }
+
+                return {
+                    label: profile.name,
+                    data: dataPoints,
+                    borderColor: color,
+                    backgroundColor: color,
+                    borderWidth: 3,
+                    pointRadius: 4,
+                    pointHoverRadius: 7,
+                    tension: 0.3, // Curve the lines slightly
+                    fill: false
+                };
+            });
+
+            renderChart(labels, datasets, metricLabel, invertYAxis);
+        }
+
+        function renderChart(labels, datasets, yAxisLabel, invertYAxis) {
+            const ctx = document.getElementById('fplChart').getContext('2d');
+            
+            if (chartInstance) {
+                chartInstance.destroy(); // Destroy old chart before rendering new one
+            }
+
+            Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+            Chart.defaults.color = '#4b5563';
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { 
+                            position: 'top', 
+                            labels: { usePointStyle: true, padding: 20, font: { size: 14, weight: 'bold' } } 
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(55, 0, 60, 0.95)',
+                            titleFont: { size: 14, weight: 'bold' },
+                            bodyFont: { size: 14 },
+                            padding: 12,
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    let val = context.parsed.y;
+                                    if (label) label += ': ';
+                                    // Add commas for large numbers like OR or Values
+                                    return label + val.toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { 
+                            grid: { display: false },
+                            ticks: { maxTicksLimit: 20, font: { weight: '600' } }
+                        },
+                        y: {
+                            reverse: invertYAxis, // FLIP THE AXIS IF IT IS A RANK!
+                            beginAtZero: !invertYAxis,
+                            title: { display: true, text: yAxisLabel, font: { weight: 'bold', size: 14 } },
+                            grid: { color: '#e5e7eb' },
+                            ticks: {
+                                precision: 0,
+                                callback: function(value) {
+                                    // Don't show rank "0"
+                                    if (invertYAxis && value === 0) return '';
+                                    return value.toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                }
+            });
+        }
+
+        // Kick off!
+        window.onload = initApp;
+    </script>
+</body>
+</html>
