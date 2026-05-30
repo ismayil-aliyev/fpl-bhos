@@ -140,8 +140,8 @@
                         <thead class="sticky top-0 bg-white shadow-sm z-10">
                             <tr class="bg-gray-100 text-sm text-gray-700">
                                 <th class="p-3 border-b font-bold" id="colName">Entity Name</th>
-                                <th class="p-3 border-b font-bold text-center sortable sort-desc" data-sort="total" onclick="sortTable('total', this)">Total Owned (End GW)</th>
-                                <th class="p-3 border-b font-bold text-center sortable" data-sort="held" onclick="sortTable('held', this)">Held</th>
+                                <th class="p-3 border-b font-bold text-center sortable" data-sort="total" onclick="sortTable('total', this)">Total Owned (End GW)</th>
+                                <th class="p-3 border-b font-bold text-center sortable sort-desc" data-sort="held" onclick="sortTable('held', this)">Held</th>
                                 <th class="p-3 border-b font-bold text-center sortable" data-sort="in" onclick="sortTable('in', this)">Transferred In</th>
                                 <th class="p-3 border-b font-bold text-center sortable" data-sort="out" onclick="sortTable('out', this)">Transferred Out</th>
                                 <th class="p-3 border-b font-bold text-center sortable" data-sort="net" onclick="sortTable('net', this)">Net Change</th>
@@ -169,7 +169,7 @@
             names: {},
             maxGW: 38,
             tableData: [], // Stores data for sorting
-            currentSortCol: 'total',
+            currentSortCol: 'held',
             currentSortDesc: true
         };
 
