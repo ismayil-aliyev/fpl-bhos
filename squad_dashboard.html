@@ -196,17 +196,23 @@
 
                 // Parse Names
                 Papa.parse(namesRes, {
-                    header: true, skipEmptyLines: true,
+                    header: true, 
+                    skipEmptyLines: true,
+                    transformHeader: h => h.trim(), // Strips invisible Windows characters
                     complete: function(results) {
                         results.data.forEach(row => {
-                            if(row.ID && row.Name) STATE.names[row.ID.trim()] = row.Name.trim();
+                            if(row.ID && row.Name) {
+                                STATE.names[String(row.ID).trim()] = row.Name.trim();
+                            }
                         });
                     }
                 });
 
                 // Parse Squads
                 Papa.parse(squadsRes, {
-                    header: true, skipEmptyLines: true,
+                    header: true, 
+                    skipEmptyLines: true,
+                    transformHeader: h => h.trim(), // Strips invisible Windows characters
                     complete: function(results) {
                         STATE.squads = results.data;
                         
@@ -278,18 +284,25 @@
 
             // 1. Initialize Aggregation Object
             let aggregated = {};
-            Object.keys(STATE.names).forEach(id => {
-                aggregated[id] = 0;
-            });
 
             // 2. Loop through every player row in the CSV
             STATE.squads.forEach(row => {
-                let gw = parseInt(row['Week']);
-                let id = row['Profile ID'];
+                let gwStr = row['Week'];
+                let idRaw = row['Profile ID'];
                 
-                if (gw >= startGW && gw <= endGW && aggregated[id] !== undefined) {
+                if (!gwStr || !idRaw) return; // Skip invalid rows
+                
+                let gw = parseInt(gwStr);
+                let id = String(idRaw).trim();
+                
+                if (gw >= startGW && gw <= endGW) {
                     // Check starter/bench filter
-                    if (!includeBench && row['Starter/Sub'] !== 'Starter') return;
+                    if (!includeBench && String(row['Starter/Sub']).trim() !== 'Starter') return;
+
+                    // Initialize this profile dynamically if we haven't seen them yet
+                    if (aggregated[id] === undefined) {
+                        aggregated[id] = 0;
+                    }
 
                     // Add metric value
                     let val = parseFloat(row[metricKey]);
@@ -302,7 +315,7 @@
             // 3. Convert to Array and Sort
             STATE.currentData = Object.keys(aggregated).map(id => ({
                 id: id,
-                name: STATE.names[id],
+                name: STATE.names[id] || `Manager ${id}`, // Fallback if mapping file misses an ID
                 value: aggregated[id]
             }));
 
