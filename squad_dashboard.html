@@ -198,7 +198,9 @@
                 Papa.parse(namesRes, {
                     header: true, 
                     skipEmptyLines: true,
-                    transformHeader: h => h.trim(), // Strips invisible Windows characters
+                    // Rigorously strip Byte Order Marks (BOM) and invisible characters
+                    transformHeader: h => h.replace(/^[\u200B-\u200D\uFEFF]+/, '').trim(),
+                    transform: v => typeof v === 'string' ? v.trim() : v,
                     complete: function(results) {
                         results.data.forEach(row => {
                             if(row.ID && row.Name) {
@@ -212,9 +214,13 @@
                 Papa.parse(squadsRes, {
                     header: true, 
                     skipEmptyLines: true,
-                    transformHeader: h => h.trim(), // Strips invisible Windows characters
+                    // Rigorously strip Byte Order Marks (BOM) and invisible characters
+                    transformHeader: h => h.replace(/^[\u200B-\u200D\uFEFF]+/, '').trim(),
+                    transform: v => typeof v === 'string' ? v.trim() : v,
                     complete: function(results) {
                         STATE.squads = results.data;
+                        
+                        console.log("Headers successfully detected:", results.meta.fields);
                         
                         // Find max gameweek available in data
                         let maxWeek = 1;
@@ -287,8 +293,9 @@
 
             // 2. Loop through every player row in the CSV
             STATE.squads.forEach(row => {
-                let gwStr = row['Week'];
-                let idRaw = row['Profile ID'];
+                // Using fallbacks just in case the headers got renamed slightly
+                let gwStr = row['Week'] || row['GW'];
+                let idRaw = row['Profile ID'] || row['Profile_ID'] || row['ID'];
                 
                 if (!gwStr || !idRaw) return; // Skip invalid rows
                 
@@ -297,7 +304,7 @@
                 
                 if (gw >= startGW && gw <= endGW) {
                     // Check starter/bench filter
-                    if (!includeBench && String(row['Starter/Sub']).trim() !== 'Starter') return;
+                    if (!includeBench && String(row['Starter/Sub']) !== 'Starter') return;
 
                     // Initialize this profile dynamically if we haven't seen them yet
                     if (aggregated[id] === undefined) {
@@ -348,6 +355,15 @@
             const labels = STATE.currentData.map(d => d.name);
             const dataPoints = STATE.currentData.map(d => formatValue(d.value));
 
+            // Calculate BHOS Average dynamically
+            const total = STATE.currentData.reduce((sum, d) => sum + d.value, 0);
+            const avg = STATE.currentData.length > 0 ? total / STATE.currentData.length : 0;
+            const avgDataPoints = Array(STATE.currentData.length).fill(formatValue(avg));
+
+            // Get pretty metric name for the legend
+            const metricKey = document.getElementById('metricSelect').value;
+            const metricName = METRICS[metricKey] ? METRICS[metricKey].name : metricKey;
+
             // Chart.js Setup
             const ctx = document.getElementById('squadChart').getContext('2d');
             if (chartInstance) chartInstance.destroy();
@@ -358,22 +374,42 @@
                 type: 'bar',
                 data: {
                     labels: labels,
-                    datasets: [{
-                        label: document.getElementById('metricSelect').value,
-                        data: dataPoints,
-                        backgroundColor: '#00FF87', // FPL Green
-                        borderColor: '#37003C', // FPL Purple
-                        borderWidth: 1,
-                        borderRadius: 4,
-                        hoverBackgroundColor: '#37003C'
-                    }]
+                    datasets: [
+                        {
+                            type: 'line',
+                            label: 'BHOS Average',
+                            data: avgDataPoints,
+                            borderColor: '#3b82f6', // Tailwind Blue-500
+                            backgroundColor: '#3b82f6',
+                            borderWidth: 2,
+                            borderDash: [5, 5], // Make it a dashed line to look distinct
+                            pointRadius: 0, // Hide the dots so it looks like a continuous line
+                            pointHoverRadius: 0,
+                            order: 0 // Forces the line to draw ON TOP of the bars
+                        },
+                        {
+                            type: 'bar',
+                            label: metricName,
+                            data: dataPoints,
+                            backgroundColor: '#00FF87', // FPL Green
+                            borderColor: '#37003C', // FPL Purple
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            hoverBackgroundColor: '#37003C',
+                            order: 1 // Draws below the line
+                        }
+                    ]
                 },
                 options: {
                     indexAxis: 'y', // This flips the chart horizontally
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { display: false },
+                        legend: { 
+                            display: true, // Turned on so users see the BHOS Average key
+                            position: 'top',
+                            labels: { font: { weight: 'bold' } }
+                        },
                         tooltip: {
                             backgroundColor: 'rgba(55, 0, 60, 0.95)',
                             titleFont: { size: 14, weight: 'bold' },
