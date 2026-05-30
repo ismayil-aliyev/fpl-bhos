@@ -136,8 +136,21 @@
             </div>
             <div class="text-sm text-gray-500 mb-4" id="chartSubtitle"></div>
             
-            <div class="relative flex-grow w-full min-h-[600px]">
-                <canvas id="h2hChart"></canvas>
+            <div class="grid grid-cols-1 gap-8 flex-grow w-full">
+                <!-- Chart 1 Container -->
+                <div class="relative w-full min-h-[400px] border border-gray-100 rounded-lg p-4 bg-gray-50 flex flex-col">
+                    <h3 id="chartTitle1" class="text-lg font-bold text-gray-800 mb-4 text-center"></h3>
+                    <div class="relative flex-grow w-full">
+                        <canvas id="chart1"></canvas>
+                    </div>
+                </div>
+                <!-- Chart 2 Container -->
+                <div class="relative w-full min-h-[400px] border border-gray-100 rounded-lg p-4 bg-gray-50 flex flex-col">
+                    <h3 id="chartTitle2" class="text-lg font-bold text-gray-800 mb-4 text-center"></h3>
+                    <div class="relative flex-grow w-full">
+                        <canvas id="chart2"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
@@ -179,7 +192,8 @@
             colorMap: {} // Maps specific categories to consistent colors
         };
 
-        let chartInstance = null;
+        let chartInstance1 = null;
+        let chartInstance2 = null;
 
         // --- 2. INITIALIZATION ---
         async function initApp() {
@@ -341,25 +355,34 @@
             });
 
             // Build Chart.js Datasets
-            // We use Chart.js built-in grouping: Datasets with the SAME stack ID stack on top of each other.
-            // So we will have 2 stacks per X-Axis point (one for Profile1, one for Profile2).
-            const datasets = [];
+            // Now we build two entirely separate arrays of datasets.
+            const datasets1 = [];
+            const datasets2 = [];
             const labels = [];
             
             for (let gw = startGW; gw <= endGW; gw++) {
                 labels.push(`GW ${gw}`);
             }
 
-            // To keep the legend clean, we use custom logic to bind colors securely to the category
-            Array.from(uniqueCategories).sort().forEach(cat => {
+            // Calculate combined total values for each category to sort them (biggest at the bottom)
+            const categoryTotals = {};
+            Array.from(uniqueCategories).forEach(cat => {
+                categoryTotals[cat] = 0;
+                for (let gw = startGW; gw <= endGW; gw++) {
+                    categoryTotals[cat] += (agg[gw][profile1][cat] || 0) + (agg[gw][profile2][cat] || 0);
+                }
+            });
+
+            // Sort categories descending by total value (Chart.js draws the first array item at the bottom)
+            const sortedCategories = Array.from(uniqueCategories).sort((a, b) => categoryTotals[b] - categoryTotals[a]);
+
+            // Iterate over ALL sorted categories across BOTH profiles so colors and stack order match perfectly
+            sortedCategories.forEach(cat => {
                 const color = getColorForCategory(cat);
 
                 // Profile 1 Dataset for this category
-                datasets.push({
-                    label: cat, // Shared label name to trigger Chart.js legend de-duplication script below
-                    categoryName: cat, 
-                    profileName: p1Name,
-                    stack: 'Stack_P1', // All P1 datasets stack together
+                datasets1.push({
+                    label: cat, 
                     data: labels.map((_, i) => {
                         let gw = startGW + i;
                         let rawVal = agg[gw][profile1][cat] || 0;
@@ -374,11 +397,8 @@
                 });
 
                 // Profile 2 Dataset for this category
-                datasets.push({
+                datasets2.push({
                     label: cat,
-                    categoryName: cat,
-                    profileName: p2Name,
-                    stack: 'Stack_P2', // All P2 datasets stack together
                     data: labels.map((_, i) => {
                         let gw = startGW + i;
                         let rawVal = agg[gw][profile2][cat] || 0;
@@ -387,117 +407,88 @@
                         }
                         return rawVal;
                     }),
-                    backgroundColor: color, // Shares the same color as P1!
+                    backgroundColor: color,
                     borderColor: '#ffffff',
                     borderWidth: 1
                 });
             });
 
-            renderH2HChart(labels, datasets, displayMode, p1Name, p2Name);
+            // Update individual chart titles
+            document.getElementById('chartTitle1').innerText = p1Name;
+            document.getElementById('chartTitle2').innerText = p2Name;
+
+            renderH2HCharts(labels, datasets1, datasets2, displayMode);
         }
 
-        function renderH2HChart(labels, datasets, displayMode, p1Name, p2Name) {
-            const ctx = document.getElementById('h2hChart').getContext('2d');
-            if (chartInstance) chartInstance.destroy();
+        function renderH2HCharts(labels, datasets1, datasets2, displayMode) {
+            // Destroy existing charts to prevent overlap
+            if (chartInstance1) chartInstance1.destroy();
+            if (chartInstance2) chartInstance2.destroy();
 
             Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
             
-            chartInstance = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: datasets
+            // Reusable config options to keep both charts identical
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    axis: 'x',
+                    intersect: false
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        mode: 'nearest',
-                        axis: 'x',
-                        intersect: false
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { boxWidth: 15 } // Standard legend since charts are separated now
                     },
-                    plugins: {
-                        // Custom Legend to merge the duplicated Profile1/Profile2 labels into single category buttons
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                generateLabels: function(chart) {
-                                    const uniqueCats = new Set();
-                                    const customLabels = [];
-                                    chart.data.datasets.forEach((dataset, i) => {
-                                        if (!uniqueCats.has(dataset.categoryName)) {
-                                            uniqueCats.add(dataset.categoryName);
-                                            customLabels.push({
-                                                text: dataset.categoryName,
-                                                fillStyle: dataset.backgroundColor,
-                                                strokeStyle: '#fff',
-                                                lineWidth: 1,
-                                                hidden: !chart.isDatasetVisible(i),
-                                                datasetIndex: i // Points to the first instance of this category
-                                            });
-                                        }
-                                    });
-                                    return customLabels;
-                                }
-                            },
-                            // Custom Click handler to toggle BOTH P1 and P2 datasets for that category
-                            onClick: function(e, legendItem, legend) {
-                                const index = legendItem.datasetIndex;
-                                const ci = legend.chart;
-                                const targetCategory = ci.data.datasets[index].categoryName;
-                                
-                                const isCurrentlyVisible = ci.isDatasetVisible(index);
-                                
-                                ci.data.datasets.forEach((ds, i) => {
-                                    if (ds.categoryName === targetCategory) {
-                                        if (isCurrentlyVisible) {
-                                            ci.hide(i);
-                                        } else {
-                                            ci.show(i);
-                                        }
-                                    }
-                                });
-                            }
-                        },
-                        tooltip: {
-                            backgroundColor: 'rgba(55, 0, 60, 0.95)',
-                            titleFont: { size: 14, weight: 'bold' },
-                            bodyFont: { size: 13 },
-                            padding: 12, 
-                            cornerRadius: 8,
-                            callbacks: {
-                                // Group the tooltip so it clearly says "P1: Category: Value"
-                                title: function(context) {
-                                    return context[0].label; // Gameweek
-                                },
-                                label: function(context) {
-                                    let ds = context.dataset;
-                                    let val = context.parsed.y;
-                                    if (val === 0) return null; // Hide 0s in tooltip
-                                    
-                                    let formattedVal = displayMode === 'percent' ? val.toFixed(1) + '%' : parseFloat(val.toFixed(2));
-                                    return `${ds.profileName} - ${ds.categoryName}: ${formattedVal}`;
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: { 
-                            stacked: true, // Crucial for Grouped Stacked Bars
-                            grid: { display: false }
-                        },
-                        y: {
-                            stacked: true, // Crucial for Grouped Stacked Bars
-                            beginAtZero: true,
-                            max: displayMode === 'percent' ? 100 : undefined,
-                            title: {
-                                display: true,
-                                text: displayMode === 'percent' ? '% Breakdown' : 'Absolute Value',
-                                font: { weight: 'bold' }
+                    tooltip: {
+                        backgroundColor: 'rgba(55, 0, 60, 0.95)',
+                        titleFont: { size: 14, weight: 'bold' },
+                        bodyFont: { size: 13 },
+                        padding: 12, 
+                        cornerRadius: 8,
+                        callbacks: {
+                            label: function(context) {
+                                let val = context.parsed.y;
+                                if (val === 0) return null; // Hide 0s in tooltip
+                                let formattedVal = displayMode === 'percent' ? val.toFixed(1) + '%' : parseFloat(val.toFixed(2));
+                                return `${context.dataset.label}: ${formattedVal}`;
                             }
                         }
                     }
+                },
+                scales: {
+                    x: { 
+                        stacked: true,
+                        grid: { display: false }
+                    },
+                    y: {
+                        stacked: true,
+                        beginAtZero: true,
+                        max: displayMode === 'percent' ? 100 : undefined,
+                        title: {
+                            display: true,
+                            text: displayMode === 'percent' ? '% Breakdown' : 'Absolute Value',
+                            font: { weight: 'bold' }
+                        }
+                    }
                 }
+            };
+
+            // Draw Chart 1
+            const ctx1 = document.getElementById('chart1').getContext('2d');
+            chartInstance1 = new Chart(ctx1, {
+                type: 'bar',
+                data: { labels: labels, datasets: datasets1 },
+                options: commonOptions
+            });
+
+            // Draw Chart 2
+            const ctx2 = document.getElementById('chart2').getContext('2d');
+            chartInstance2 = new Chart(ctx2, {
+                type: 'bar',
+                data: { labels: labels, datasets: datasets2 },
+                options: commonOptions
             });
         }
 
