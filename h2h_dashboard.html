@@ -303,6 +303,10 @@
             
             const availableIds = [...new Set(STATE.squads.map(r => String(r['Profile ID'] || r['Profile_ID'] || r['ID']).trim()))].filter(id => id);
             
+            // Add the "ALL" option first so it sits at the top of the dropdowns
+            p1.appendChild(new Option("All Managers (Total)", "ALL"));
+            p2.appendChild(new Option("All Managers (Total)", "ALL"));
+
             availableIds.forEach((id) => {
                 const name = STATE.names[id] || `Manager ${id}`;
                 p1.appendChild(new Option(name, id));
@@ -379,8 +383,9 @@
             const profile1 = document.getElementById('profile1Select').value;
             const profile2 = document.getElementById('profile2Select').value;
             
-            const p1Name = STATE.names[profile1] || `Manager ${profile1}`;
-            const p2Name = STATE.names[profile2] || `Manager ${profile2}`;
+            // Special name handling for the "ALL" option
+            const p1Name = profile1 === 'ALL' ? 'All Managers (Total)' : (STATE.names[profile1] || `Manager ${profile1}`);
+            const p2Name = profile2 === 'ALL' ? 'All Managers (Total)' : (STATE.names[profile2] || `Manager ${profile2}`);
 
             const metricKey = document.getElementById('metricSelect').value;
             const metricName = METRICS[metricKey];
@@ -416,7 +421,11 @@
                 let gw = parseInt(gwStr);
                 let id = String(idRaw).trim();
                 
-                if (gw >= 1 && gw <= endGW && (id === profile1 || id === profile2)) {
+                // Check if the current row belongs to Profile 1, Profile 2, or if "ALL" is selected
+                let match1 = (profile1 === 'ALL' || id === profile1);
+                let match2 = (profile2 === 'ALL' || id === profile2);
+
+                if (gw >= 1 && gw <= endGW && (match1 || match2)) {
                     if (!includeBench && String(row['Starter/Sub']).trim() !== 'Starter') return;
 
                     let cat = (row[groupBy] || "Unknown").trim();
@@ -424,8 +433,18 @@
                     
                     if (!isNaN(val)) {
                         if (gw >= startGW) uniqueCategories.add(cat);
-                        agg[gw][id][cat] = (agg[gw][id][cat] || 0) + val;
-                        gwTotals[gw][id] += val;
+                        
+                        // Add to Profile 1's bucket if it matched
+                        if (match1) {
+                            agg[gw][profile1][cat] = (agg[gw][profile1][cat] || 0) + val;
+                            gwTotals[gw][profile1] += val;
+                        }
+                        
+                        // Add to Profile 2's bucket if it matched
+                        if (match2) {
+                            agg[gw][profile2][cat] = (agg[gw][profile2][cat] || 0) + val;
+                            gwTotals[gw][profile2] += val;
+                        }
                     }
                 }
             });
