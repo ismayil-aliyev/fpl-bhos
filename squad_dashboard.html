@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BHOS FPL Mini League - Squad Insights</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- PapaParse -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <!-- noUiSlider -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
+
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .fpl-purple { background-color: #37003C; }
+        .fpl-purple-text { color: #37003C; }
+        .fpl-green { color: #00FF87; }
+        .fpl-green-bg { background-color: #00FF87; }
+        
+        .noUi-connect { background-color: #37003C; }
+        .noUi-handle { border-radius: 50%; background: #00FF87; border: 2px solid #37003C; box-shadow: none; cursor: grab; }
+        .noUi-handle:before, .noUi-handle:after { display: none; }
+        .noUi-handle:active { cursor: grabbing; }
+
+        /* Table Sort Arrows */
+        th.sortable:hover { background-color: #e5e7eb; cursor: pointer; }
+        .sort-icon::after { content: ' \25B2\25BC'; font-size: 0.7em; color: #9ca3af; margin-left: 5px; }
+        .sort-desc::after { content: ' \25BC'; color: #37003C; }
+        .sort-asc::after { content: ' \25B2'; color: #37003C; }
+    </style>
+</head>
+<body class="min-h-screen pb-12">
+
+    <!-- Header -->
+    <header class="fpl-purple text-white p-5 shadow-lg flex justify-between items-center mb-8">
+        <div>
+            <h1 class="text-2xl font-bold flex items-center gap-3">
+                <span class="text-3xl">⚽</span> BHOS FPL mini league
+            </h1>
+            <div class="text-sm text-gray-300 mt-1">Squad-Level Insights Dashboard</div>
+        </div>
+        <div class="flex items-center gap-4">
+            <a href="index.html" class="text-sm font-semibold hover:text-[#00FF87] transition-colors underline">⬅ Go to History Dashboard</a>
+            <div id="loadingStatus" class="fpl-green font-semibold text-sm animate-pulse bg-purple-800 px-3 py-1 rounded">
+                Loading Data...
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="appContent" class="max-w-[1400px] mx-auto px-4 grid grid-cols-1 lg:grid-cols-4 gap-6 hidden">
+        
+        <!-- SIDEBAR CONTROLS -->
+        <div class="bg-white p-5 rounded-xl shadow-md border border-gray-200 lg:col-span-1 h-fit">
+            <h2 class="text-lg font-extrabold text-gray-800 mb-5 border-b pb-2">Analysis Controls</h2>
+            
+            <!-- Gameweek Slider -->
+            <div class="mb-8">
+                <label class="block text-sm font-bold text-gray-700 mb-4 flex justify-between">
+                    <span>Gameweek Range</span>
+                    <span id="sliderValues" class="text-purple-700 font-extrabold">GW 1 - 38</span>
+                </label>
+                <div class="px-2">
+                    <div id="gwSlider"></div>
+                </div>
+            </div>
+
+            <!-- Metric Selector -->
+            <div class="mb-4">
+                <label class="block text-sm font-bold text-gray-700 mb-2">Select Insight Metric</label>
+                <select id="metricSelect" class="w-full border-2 border-gray-300 rounded-lg p-2.5 text-sm font-medium focus:border-purple-800 focus:ring-0 outline-none transition-colors" onchange="updateDashboard()">
+                    <!-- Populated by JS -->
+                </select>
+            </div>
+
+            <!-- Metric Explanation Box -->
+            <div id="metricExplanation" class="mb-6 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800 font-medium">
+                <!-- Populated by JS -->
+            </div>
+
+            <!-- Bench Toggle -->
+            <div class="mb-2 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                <label class="flex items-center cursor-pointer">
+                    <input type="checkbox" id="includeBench" class="w-5 h-5 text-purple-600 rounded focus:ring-purple-500 mr-3" onchange="updateDashboard()">
+                    <div>
+                        <div class="text-sm font-bold text-gray-800">Include Bench Players</div>
+                        <div class="text-xs text-gray-500">Default calculates Starters only.</div>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <!-- CHARTS & TABLES -->
+        <div class="lg:col-span-3 flex flex-col gap-6">
+            
+            <!-- Bar Chart Area -->
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 id="chartTitle" class="text-xl font-extrabold fpl-purple-text">Metric Comparison</h2>
+                </div>
+                <div class="relative w-full h-[400px]">
+                    <canvas id="squadChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Data Table Area -->
+            <div class="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+                <div class="p-4 border-b bg-gray-50">
+                    <h3 class="text-lg font-bold text-gray-800">Detailed Rankings</h3>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 text-sm text-gray-700">
+                                <th class="p-3 border-b font-bold w-20">Rank</th>
+                                <th class="p-3 border-b font-bold">Manager Name</th>
+                                <th class="p-3 border-b font-bold sortable sort-desc" id="tableValueHeader" onclick="toggleSort()">Value <span class="text-xs font-normal text-gray-500">(Click to sort)</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="dataTableBody" class="text-sm">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Error State -->
+    <div id="errorState" class="max-w-2xl mx-auto mt-10 bg-red-50 border-l-4 border-red-500 p-6 rounded shadow-md hidden">
+        <h3 class="text-xl font-bold text-red-700 mb-2">Data Loading Error</h3>
+        <p class="text-gray-700 mb-4">Could not load `squads.csv` or `id-name.csv`.</p>
+        <p class="text-sm text-gray-500 mt-4" id="errorLog"></p>
+    </div>
+
+    <script>
+        // --- 1. CONFIGURATION & METRICS ---
+        const METRICS = {
+            "Pts": { name: "Total Points", desc: "Raw points scored by the players (Does NOT double for captaincy here to show true player output)." },
+            "MP": { name: "Minutes Played", desc: "Total minutes played on the pitch." },
+            "GS": { name: "Goals Scored", desc: "Total goals scored by the selected players." },
+            "A": { name: "Assists", desc: "Total assists provided." },
+            "CS": { name: "Clean Sheets", desc: "Total clean sheets kept by defenders/goalkeepers." },
+            "GC": { name: "Goals Conceded", desc: "Total goals conceded while players were on the pitch." },
+            "OG": { name: "Own Goals", desc: "Total own goals scored." },
+            "PS": { name: "Penalties Saved", desc: "Total penalties saved (Goalkeepers only)." },
+            "PM": { name: "Penalties Missed", desc: "Total penalties missed." },
+            "YC": { name: "Yellow Cards", desc: "Total yellow cards received." },
+            "RC": { name: "Red Cards", desc: "Total red cards received." },
+            "S": { name: "Saves", desc: "Total saves made (Goalkeepers only)." },
+            "BP": { name: "Bonus Points", desc: "Actual Bonus Points (1-3) awarded after the match." },
+            "BPS": { name: "Bonus Points System", desc: "Underlying BPS score used to determine who gets Bonus Points." },
+            "I": { name: "Influence", desc: "Evaluates a player's impact on a match (e.g. goals, decisive actions)." },
+            "C": { name: "Creativity", desc: "Assesses player performance in terms of producing goalscoring opportunities." },
+            "T": { name: "Threat", desc: "Examines a player's threat on goal (shots, penalty area touches)." },
+            "II": { name: "ICT Index", desc: "A combination of Influence, Creativity, and Threat." },
+            "CBI": { name: "Clearances, Blocks & Interceptions", desc: "Defensive actions combined." },
+            "R": { name: "Recoveries", desc: "Ball recoveries." },
+            "DC": { name: "Defensive Contributions", desc: "Overall defensive contributions." },
+            "ST": { name: "Matches Started (Real Life)", desc: "1 point if the player started the real-life match, 0 if subbed on." },
+            "xG": { name: "Expected Goals (xG)", desc: "The probability that a shot will result in a goal." },
+            "xA": { name: "Expected Assists (xA)", desc: "The likelihood that a pass will result in a goal assist." },
+            "xGI": { name: "Expected Goal Involvements (xGI)", desc: "xG + xA combined." },
+            "xGC": { name: "Expected Goals Conceded (xGC)", desc: "Expected goals conceded while the player was on the pitch." }
+        };
+
+        const STATE = {
+            squads: [],
+            names: {},
+            currentData: [], // Holds currently filtered/sorted array for the table
+            sortDesc: true,
+            maxGW: 38
+        };
+
+        let chartInstance = null;
+
+        // --- 2. INITIALIZATION ---
+        async function initApp() {
+            populateMetricDropdown();
+
+            try {
+                const [squadsRes, namesRes] = await Promise.all([
+                    fetch('squads.csv').then(r => r.text()),
+                    fetch('id-name.csv').then(r => r.text())
+                ]);
+
+                // Parse Names
+                Papa.parse(namesRes, {
+                    header: true, skipEmptyLines: true,
+                    complete: function(results) {
+                        results.data.forEach(row => {
+                            if(row.ID && row.Name) STATE.names[row.ID.trim()] = row.Name.trim();
+                        });
+                    }
+                });
+
+                // Parse Squads
+                Papa.parse(squadsRes, {
+                    header: true, skipEmptyLines: true,
+                    complete: function(results) {
+                        STATE.squads = results.data;
+                        
+                        // Find max gameweek available in data
+                        let maxWeek = 1;
+                        STATE.squads.forEach(r => {
+                            let w = parseInt(r['Week']);
+                            if(w > maxWeek) maxWeek = w;
+                        });
+                        STATE.maxGW = maxWeek || 38;
+
+                        buildUI();
+                    }
+                });
+            } catch (error) {
+                document.getElementById('loadingStatus').style.display = 'none';
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorLog').innerText = error.toString();
+            }
+        }
+
+        function populateMetricDropdown() {
+            const select = document.getElementById('metricSelect');
+            Object.keys(METRICS).forEach(key => {
+                const option = document.createElement('option');
+                option.value = key;
+                option.innerText = `${key} - ${METRICS[key].name}`;
+                select.appendChild(option);
+            });
+        }
+
+        // --- 3. UI SETUP ---
+        function buildUI() {
+            document.getElementById('loadingStatus').style.display = 'none';
+            document.getElementById('appContent').classList.remove('hidden');
+
+            const slider = document.getElementById('gwSlider');
+            noUiSlider.create(slider, {
+                start: [1, STATE.maxGW],
+                connect: true, step: 1,
+                range: { 'min': 1, 'max': 38 },
+                format: { to: v => Math.round(v), from: v => Math.round(v) }
+            });
+
+            slider.noUiSlider.on('update', function (values) {
+                document.getElementById('sliderValues').innerText = `GW ${values[0]} - ${values[1]}`;
+            });
+
+            slider.noUiSlider.on('change', updateDashboard);
+
+            updateDashboard(); // Run initial calculation
+        }
+
+        // --- 4. DATA CALCULATION ---
+        function updateDashboard() {
+            const sliderVals = document.getElementById('gwSlider').noUiSlider.get();
+            const startGW = parseInt(sliderVals[0]);
+            const endGW = parseInt(sliderVals[1]);
+            
+            const metricKey = document.getElementById('metricSelect').value;
+            const includeBench = document.getElementById('includeBench').checked;
+
+            // Update UI Labels
+            document.getElementById('metricExplanation').innerHTML = `<strong>💡 ${METRICS[metricKey].name}:</strong> ${METRICS[metricKey].desc}`;
+            document.getElementById('chartTitle').innerText = `${METRICS[metricKey].name} (GW ${startGW}-${endGW})`;
+
+            // 1. Initialize Aggregation Object
+            let aggregated = {};
+            Object.keys(STATE.names).forEach(id => {
+                aggregated[id] = 0;
+            });
+
+            // 2. Loop through every player row in the CSV
+            STATE.squads.forEach(row => {
+                let gw = parseInt(row['Week']);
+                let id = row['Profile ID'];
+                
+                if (gw >= startGW && gw <= endGW && aggregated[id] !== undefined) {
+                    // Check starter/bench filter
+                    if (!includeBench && row['Starter/Sub'] !== 'Starter') return;
+
+                    // Add metric value
+                    let val = parseFloat(row[metricKey]);
+                    if (!isNaN(val)) {
+                        aggregated[id] += val;
+                    }
+                }
+            });
+
+            // 3. Convert to Array and Sort
+            STATE.currentData = Object.keys(aggregated).map(id => ({
+                id: id,
+                name: STATE.names[id],
+                value: aggregated[id]
+            }));
+
+            executeSort(); // Sorts and triggers renders
+        }
+
+        // --- 5. SORTING LOGIC ---
+        function toggleSort() {
+            STATE.sortDesc = !STATE.sortDesc;
+            
+            // Update table header UI
+            const th = document.getElementById('tableValueHeader');
+            th.classList.remove('sort-asc', 'sort-desc');
+            th.classList.add(STATE.sortDesc ? 'sort-desc' : 'sort-asc');
+
+            executeSort();
+        }
+
+        function executeSort() {
+            STATE.currentData.sort((a, b) => {
+                return STATE.sortDesc ? (b.value - a.value) : (a.value - b.value);
+            });
+            
+            renderChart();
+            renderTable();
+        }
+
+        // --- 6. RENDER OUTPUTS ---
+        function renderChart() {
+            const labels = STATE.currentData.map(d => d.name);
+            const dataPoints = STATE.currentData.map(d => formatValue(d.value));
+
+            // Chart.js Setup
+            const ctx = document.getElementById('squadChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+            
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: document.getElementById('metricSelect').value,
+                        data: dataPoints,
+                        backgroundColor: '#00FF87', // FPL Green
+                        borderColor: '#37003C', // FPL Purple
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        hoverBackgroundColor: '#37003C'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(55, 0, 60, 0.95)',
+                            titleFont: { size: 14, weight: 'bold' },
+                            bodyFont: { size: 14 },
+                            padding: 12, cornerRadius: 8
+                        }
+                    },
+                    scales: {
+                        x: { 
+                            grid: { display: false },
+                            ticks: { autoSkip: false, maxRotation: 45, minRotation: 45 }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#e5e7eb' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('dataTableBody');
+            tbody.innerHTML = '';
+
+            STATE.currentData.forEach((row, index) => {
+                const tr = document.createElement('tr');
+                tr.className = "border-b border-gray-100 hover:bg-purple-50 transition-colors";
+                
+                // Highlight Top 3
+                let rankStyle = "text-gray-600";
+                if(index === 0) rankStyle = "font-bold text-yellow-500 text-lg";
+                if(index === 1) rankStyle = "font-bold text-gray-400 text-lg";
+                if(index === 2) rankStyle = "font-bold text-amber-700 text-lg";
+
+                tr.innerHTML = `
+                    <td class="p-3 ${rankStyle}">${index + 1}</td>
+                    <td class="p-3 font-semibold text-gray-800">${row.name}</td>
+                    <td class="p-3 text-gray-700 font-mono">${formatValue(row.value)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Helper to cleanly format numbers (no decimals for ints, 2 decimals for floats)
+        function formatValue(val) {
+            return Number.isInteger(val) ? val : parseFloat(val.toFixed(2));
+        }
+
+        window.onload = initApp;
+    </script>
+</body>
+</html>
