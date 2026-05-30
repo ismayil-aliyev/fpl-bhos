@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BHOS FPL Mini League - Transfer Analysis</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- PapaParse -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <!-- noUiSlider -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
+
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .fpl-purple { background-color: #37003C; }
+        .fpl-purple-text { color: #37003C; }
+        .fpl-green { color: #00FF87; }
+        .fpl-green-bg { background-color: #00FF87; }
+        
+        .noUi-connect { background-color: #37003C; }
+        .noUi-handle { border-radius: 50%; background: #00FF87; border: 2px solid #37003C; box-shadow: none; cursor: grab; }
+        .noUi-handle:before, .noUi-handle:after { display: none; }
+        .noUi-handle:active { cursor: grabbing; }
+
+        /* Table Sort Arrows */
+        th.sortable:hover { background-color: #e5e7eb; cursor: pointer; }
+        .sort-icon::after { content: ' \25B2\25BC'; font-size: 0.7em; color: #9ca3af; margin-left: 5px; }
+        .sort-desc::after { content: ' \25BC'; color: #37003C; }
+        .sort-asc::after { content: ' \25B2'; color: #37003C; }
+    </style>
+</head>
+<body class="min-h-screen pb-12">
+
+    <!-- Header -->
+    <header class="fpl-purple text-white p-5 shadow-lg flex justify-between items-center mb-8">
+        <div>
+            <h1 class="text-2xl font-bold flex items-center gap-3">
+                <span class="text-3xl">🔄</span> BHOS FPL mini league
+            </h1>
+            <div class="text-sm text-gray-300 mt-1">Transfer & Ownership Analysis</div>
+        </div>
+        <div class="flex items-center gap-4">
+            <a href="index.html" class="text-sm font-semibold hover:text-[#00FF87] transition-colors underline">History</a>
+            <span class="text-gray-400">|</span>
+            <a href="squad_dashboard.html" class="text-sm font-semibold hover:text-[#00FF87] transition-colors underline">Squad Insights</a>
+            <span class="text-gray-400">|</span>
+            <a href="h2h_dashboard.html" class="text-sm font-semibold hover:text-[#00FF87] transition-colors underline">Head-to-Head</a>
+            <div id="loadingStatus" class="fpl-green font-semibold text-sm animate-pulse bg-purple-800 px-3 py-1 rounded ml-4">
+                Loading Data...
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="appContent" class="max-w-[1400px] mx-auto px-4 grid grid-cols-1 xl:grid-cols-4 gap-6 hidden">
+        
+        <!-- SIDEBAR CONTROLS -->
+        <div class="bg-white p-5 rounded-xl shadow-md border border-gray-200 xl:col-span-1 h-fit">
+            <h2 class="text-lg font-extrabold text-gray-800 mb-5 border-b pb-2">Analysis Controls</h2>
+            
+            <div class="mb-4 bg-blue-50 border border-blue-100 p-3 rounded-lg text-xs text-blue-800">
+                <strong>How this works:</strong> Select two Gameweeks. The dashboard will compare the squads from the start GW to the end GW to calculate who was bought, sold, or held.
+            </div>
+
+            <!-- Profile Selection -->
+            <div class="mb-6">
+                <label class="block text-sm font-bold text-gray-700 mb-1">Target Audience</label>
+                <select id="profileSelect" class="w-full border-2 border-gray-300 rounded p-2 text-sm focus:border-purple-800 outline-none" onchange="updateDashboard()">
+                    <!-- Populated by JS -->
+                </select>
+            </div>
+
+            <!-- Gameweek Slider -->
+            <div class="mb-8 mt-4">
+                <label class="block text-sm font-bold text-gray-700 mb-4 flex justify-between">
+                    <span>Compare Gameweeks</span>
+                    <span id="sliderValues" class="text-purple-700 font-extrabold">GW 1 vs GW 38</span>
+                </label>
+                <div class="px-2">
+                    <div id="gwSlider"></div>
+                </div>
+            </div>
+
+            <!-- Grouping -->
+            <div class="mb-6 space-y-4">
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-1">Group Transfers By</label>
+                    <select id="groupBySelect" class="w-full border-2 border-purple-300 rounded-lg p-2 text-sm font-medium focus:border-purple-800 outline-none transition-colors bg-purple-50" onchange="updateDashboard()">
+                        <option value="Player">Individual Player Name</option>
+                        <option value="Team">PL Team (Arsenal, Liverpool, etc.)</option>
+                        <option value="Position">Player Position (FWD, MID, DEF, GKP)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Display Toggles -->
+            <div class="space-y-3">
+                <div class="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="includeBench" class="w-5 h-5 text-purple-600 rounded focus:ring-purple-500 mr-3" onchange="updateDashboard()">
+                        <div>
+                            <div class="text-sm font-bold text-gray-800">Include Bench Players</div>
+                            <div class="text-xs text-gray-500">Default: Starters only.</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- CHARTS & TABLES -->
+        <div class="xl:col-span-3 flex flex-col gap-6">
+            
+            <!-- Diverging Bar Chart Area -->
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 id="chartTitle" class="text-xl font-extrabold fpl-purple-text">Transfer Flow (Net Changes)</h2>
+                </div>
+                <div class="text-sm text-gray-500 mb-6" id="chartSubtitle"></div>
+                
+                <div class="relative w-full h-[600px]">
+                    <canvas id="transferChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Data Table Area -->
+            <div class="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+                <div class="p-4 border-b bg-gray-50">
+                    <h3 class="text-lg font-bold text-gray-800">Detailed Transfer Data</h3>
+                </div>
+                <div class="overflow-x-auto max-h-[500px] overflow-y-auto custom-scroll">
+                    <table class="w-full text-left border-collapse relative">
+                        <thead class="sticky top-0 bg-white shadow-sm z-10">
+                            <tr class="bg-gray-100 text-sm text-gray-700">
+                                <th class="p-3 border-b font-bold" id="colName">Entity Name</th>
+                                <th class="p-3 border-b font-bold text-center sortable sort-desc" data-sort="total" onclick="sortTable('total', this)">Total Owned (End GW)</th>
+                                <th class="p-3 border-b font-bold text-center sortable" data-sort="held" onclick="sortTable('held', this)">Held</th>
+                                <th class="p-3 border-b font-bold text-center sortable" data-sort="in" onclick="sortTable('in', this)">Transferred In</th>
+                                <th class="p-3 border-b font-bold text-center sortable" data-sort="out" onclick="sortTable('out', this)">Transferred Out</th>
+                                <th class="p-3 border-b font-bold text-center sortable" data-sort="net" onclick="sortTable('net', this)">Net Change</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dataTableBody" class="text-sm">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Error State -->
+    <div id="errorState" class="max-w-2xl mx-auto mt-10 bg-red-50 border-l-4 border-red-500 p-6 rounded shadow-md hidden">
+        <h3 class="text-xl font-bold text-red-700 mb-2">Data Loading Error</h3>
+        <p class="text-gray-700 mb-4">Could not load `squads.csv` or `id-name.csv`.</p>
+        <p class="text-sm text-gray-500 mt-4" id="errorLog"></p>
+    </div>
+
+    <script>
+        const STATE = {
+            squads: [],
+            names: {},
+            maxGW: 38,
+            tableData: [], // Stores data for sorting
+            currentSortCol: 'total',
+            currentSortDesc: true
+        };
+
+        let chartInstance = null;
+
+        // --- 1. INITIALIZATION ---
+        async function initApp() {
+            try {
+                const [squadsRes, namesRes] = await Promise.all([
+                    fetch('squads.csv').then(r => r.text()),
+                    fetch('id-name.csv').then(r => r.text())
+                ]);
+
+                // Parse Names
+                Papa.parse(namesRes, {
+                    header: true, skipEmptyLines: true,
+                    transformHeader: h => h.replace(/^[\u200B-\u200D\uFEFF]+/, '').trim(),
+                    transform: v => typeof v === 'string' ? v.trim() : v,
+                    complete: function(results) {
+                        results.data.forEach(row => {
+                            if(row.ID && row.Name) STATE.names[String(row.ID).trim()] = row.Name.trim();
+                        });
+                    }
+                });
+
+                // Parse Squads
+                Papa.parse(squadsRes, {
+                    header: true, skipEmptyLines: true,
+                    transformHeader: h => h.replace(/^[\u200B-\u200D\uFEFF]+/, '').trim(),
+                    transform: v => typeof v === 'string' ? v.trim() : v,
+                    complete: function(results) {
+                        STATE.squads = results.data;
+                        
+                        let maxWeek = 1;
+                        STATE.squads.forEach(r => {
+                            let w = parseInt(r['Week'] || r['GW']);
+                            if(w > maxWeek) maxWeek = w;
+                        });
+                        STATE.maxGW = maxWeek || 38;
+
+                        buildUI();
+                    }
+                });
+            } catch (error) {
+                document.getElementById('loadingStatus').style.display = 'none';
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorLog').innerText = error.toString();
+            }
+        }
+
+        // --- 2. UI SETUP ---
+        function buildUI() {
+            document.getElementById('loadingStatus').style.display = 'none';
+            document.getElementById('appContent').classList.remove('hidden');
+
+            const pSelect = document.getElementById('profileSelect');
+            pSelect.appendChild(new Option("All Managers in League (Aggregated)", "ALL"));
+            
+            const availableIds = [...new Set(STATE.squads.map(r => String(r['Profile ID'] || r['Profile_ID'] || r['ID']).trim()))].filter(id => id);
+            availableIds.forEach((id) => {
+                const name = STATE.names[id] || `Manager ${id}`;
+                pSelect.appendChild(new Option(name, id));
+            });
+
+            const slider = document.getElementById('gwSlider');
+            noUiSlider.create(slider, {
+                start: [1, 2], // Default to GW1 vs GW2
+                connect: true, step: 1,
+                range: { 'min': 1, 'max': STATE.maxGW },
+                format: { to: v => Math.round(v), from: v => Math.round(v) }
+            });
+
+            slider.noUiSlider.on('update', function (values) {
+                document.getElementById('sliderValues').innerText = `GW ${values[0]} vs GW ${values[1]}`;
+            });
+
+            slider.noUiSlider.on('change', updateDashboard);
+
+            updateDashboard();
+        }
+
+        // --- 3. DATA AGGREGATION & DIFF LOGIC ---
+        function updateDashboard() {
+            const sliderVals = document.getElementById('gwSlider').noUiSlider.get();
+            const startGW = parseInt(sliderVals[0]);
+            const endGW = parseInt(sliderVals[1]);
+            
+            const profileFilter = document.getElementById('profileSelect').value;
+            const groupBy = document.getElementById('groupBySelect').value;
+            const includeBench = document.getElementById('includeBench').checked;
+
+            document.getElementById('chartSubtitle').innerText = `Comparing Squads from GW ${startGW} to GW ${endGW} | Grouped by ${groupBy}`;
+            document.getElementById('colName').innerText = groupBy;
+
+            // Structure: { profileId: { start: [], end: [] } }
+            const managerSquads = {};
+
+            // Pass 1: Collect Start & End squads for each manager
+            STATE.squads.forEach(row => {
+                let gwStr = row['Week'] || row['GW'];
+                let idRaw = row['Profile ID'] || row['Profile_ID'] || row['ID'];
+                if (!gwStr || !idRaw) return;
+                
+                let gw = parseInt(gwStr);
+                let id = String(idRaw).trim();
+
+                if (gw !== startGW && gw !== endGW) return;
+                if (profileFilter !== 'ALL' && id !== profileFilter) return;
+                if (!includeBench && String(row['Starter/Sub']).trim() !== 'Starter') return;
+
+                let entityName;
+                if (groupBy === 'Player') {
+                    // Include Team name in parenthesis to resolve duplicates (e.g. "Sarr (Spurs)" vs "Sarr (Palace)")
+                    entityName = `${row['Player'].trim()} (${row['Team'].trim()})`;
+                } else if (groupBy === 'Team') {
+                    entityName = row['Team'].trim();
+                } else {
+                    entityName = row['Position'].trim();
+                }
+
+                if (!managerSquads[id]) managerSquads[id] = { start: [], end: [] };
+                
+                if (gw === startGW) managerSquads[id].start.push(entityName);
+                if (gw === endGW) managerSquads[id].end.push(entityName);
+            });
+
+            // Pass 2: Calculate Transfers & Holds
+            const stats = {}; // entity -> { held, in, out }
+
+            Object.keys(managerSquads).forEach(id => {
+                const startCounts = {};
+                managerSquads[id].start.forEach(e => startCounts[e] = (startCounts[e] || 0) + 1);
+                
+                const endCounts = {};
+                managerSquads[id].end.forEach(e => endCounts[e] = (endCounts[e] || 0) + 1);
+
+                const allEntities = new Set([...Object.keys(startCounts), ...Object.keys(endCounts)]);
+
+                allEntities.forEach(e => {
+                    if (!stats[e]) stats[e] = { name: e, held: 0, in: 0, out: 0, totalEnd: 0, net: 0 };
+                    
+                    const sCount = startCounts[e] || 0;
+                    const eCount = endCounts[e] || 0;
+                    
+                    // Duplicate-safe diffing logic
+                    const held = Math.min(sCount, eCount);
+                    const ins = Math.max(0, eCount - sCount);
+                    const outs = Math.max(0, sCount - eCount);
+                    
+                    stats[e].held += held;
+                    stats[e].in += ins;
+                    stats[e].out += outs;
+                });
+            });
+
+            // Clean data and prep for table/chart
+            STATE.tableData = Object.values(stats).map(s => {
+                s.totalEnd = s.held + s.in;
+                s.net = s.in - s.out;
+                return s;
+            }).filter(s => s.held > 0 || s.in > 0 || s.out > 0); // Remove completely empty rows
+
+            applySortAndRender();
+        }
+
+        // --- 4. SORTING LOGIC ---
+        function sortTable(col, thElement) {
+            if (STATE.currentSortCol === col) {
+                STATE.currentSortDesc = !STATE.currentSortDesc; // Toggle direction
+            } else {
+                STATE.currentSortCol = col;
+                STATE.currentSortDesc = true; // Default to desc on new column
+            }
+
+            // Update UI headers
+            document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
+            thElement.classList.add(STATE.currentSortDesc ? 'sort-desc' : 'sort-asc');
+
+            applySortAndRender();
+        }
+
+        function applySortAndRender() {
+            STATE.tableData.sort((a, b) => {
+                let valA = a[STATE.currentSortCol];
+                let valB = b[STATE.currentSortCol];
+                return STATE.currentSortDesc ? (valB - valA) : (valA - valB);
+            });
+
+            // If we have too many rows (like grouping by Player), only chart the top 40 to keep it readable
+            // We use the same sorting chosen by the user to determine the Top 40!
+            const chartData = STATE.tableData.slice(0, 40);
+
+            renderTransferChart(chartData);
+            renderTransferTable();
+        }
+
+        // --- 5. RENDER OUTPUTS ---
+        function renderTransferChart(data) {
+            const labels = data.map(d => d.name);
+            
+            // For a diverging stacked chart, Transfers Out are Negative
+            const dataOut = data.map(d => -d.out); 
+            const dataHeld = data.map(d => d.held);
+            const dataIn = data.map(d => d.in);
+
+            const ctx = document.getElementById('transferChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+            
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Transferred Out',
+                            data: dataOut,
+                            backgroundColor: '#E3004F', // FPL Red
+                            borderWidth: 0,
+                            borderRadius: 2
+                        },
+                        {
+                            label: 'Held',
+                            data: dataHeld,
+                            backgroundColor: '#37003C', // FPL Purple
+                            borderWidth: 0,
+                            borderRadius: 2
+                        },
+                        {
+                            label: 'Transferred In',
+                            data: dataIn,
+                            backgroundColor: '#00FF87', // FPL Green
+                            borderWidth: 0,
+                            borderRadius: 2
+                        }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y', // Horizontal bars
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        axis: 'y',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: { 
+                            position: 'top',
+                            labels: { font: { weight: 'bold' } }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(55, 0, 60, 0.95)',
+                            titleFont: { size: 14, weight: 'bold' },
+                            bodyFont: { size: 14 },
+                            padding: 12, cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    // Remove the negative sign from Transfers Out in the tooltip
+                                    let val = Math.abs(context.parsed.x);
+                                    if (val === 0) return null; // Clean tooltip
+                                    return `${context.dataset.label}: ${val}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { 
+                            stacked: true, // Diverging logic requires X to be stacked
+                            title: { display: true, text: "Count of Managers", font: { weight: 'bold' } },
+                            grid: { color: (ctx) => ctx.tick.value === 0 ? '#333' : '#e5e7eb' }, // Darker line at 0
+                            ticks: {
+                                callback: function(value) { return Math.abs(value); } // Hide negatives on X axis
+                            }
+                        },
+                        y: {
+                            stacked: true, // Y must also be stacked
+                            grid: { display: false },
+                            ticks: { autoSkip: false }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTransferTable() {
+            const tbody = document.getElementById('dataTableBody');
+            tbody.innerHTML = '';
+
+            STATE.tableData.forEach((row) => {
+                const tr = document.createElement('tr');
+                tr.className = "border-b border-gray-100 hover:bg-gray-50 transition-colors";
+                
+                // Color formatting for Net Change
+                let netStyle = "font-bold text-gray-700";
+                if (row.net > 0) netStyle = "font-bold text-emerald-600";
+                if (row.net < 0) netStyle = "font-bold text-rose-600";
+
+                tr.innerHTML = `
+                    <td class="p-3 font-semibold text-gray-800">${row.name}</td>
+                    <td class="p-3 text-center bg-gray-50 font-bold">${row.totalEnd}</td>
+                    <td class="p-3 text-center text-purple-800 font-semibold">${row.held}</td>
+                    <td class="p-3 text-center text-emerald-600 font-semibold">${row.in > 0 ? '+' + row.in : 0}</td>
+                    <td class="p-3 text-center text-rose-600 font-semibold">${row.out > 0 ? '-' + row.out : 0}</td>
+                    <td class="p-3 text-center ${netStyle}">${row.net > 0 ? '+' + row.net : row.net}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        window.onload = initApp;
+    </script>
+</body>
+</html>
