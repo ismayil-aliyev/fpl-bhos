@@ -271,6 +271,9 @@
             // Update UI Labels
             document.getElementById('metricExplanation').innerHTML = `<strong>💡 ${METRICS[metricKey].name}:</strong> ${METRICS[metricKey].desc}`;
             document.getElementById('chartTitle').innerText = `${METRICS[metricKey].name} (GW ${startGW}-${endGW})`;
+            
+            // Update Table Header to match metric
+            document.getElementById('tableValueHeader').innerHTML = `${METRICS[metricKey].name} <span class="text-xs font-normal text-gray-500">(Click to sort)</span>`;
 
             // 1. Initialize Aggregation Object
             let aggregated = {};
@@ -366,7 +369,7 @@
                     scales: {
                         x: { 
                             grid: { display: false },
-                            ticks: { autoSkip: false, maxRotation: 45, minRotation: 45 }
+                            ticks: { autoSkip: false, maxRotation: 90, minRotation: 90 }
                         },
                         y: {
                             beginAtZero: true,
