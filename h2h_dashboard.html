@@ -107,18 +107,27 @@
                 </div>
             </div>
 
-            <!-- Display Mode & Toggles -->
+            <!-- Display Toggles -->
             <div class="space-y-3 mt-6">
                 <div class="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                    <label class="block text-sm font-bold text-gray-800 mb-2">Display Mode</label>
-                    <select id="displayMode" class="w-full border border-gray-300 rounded p-1.5 text-sm outline-none" onchange="updateDashboard()">
-                        <option value="absolute">Absolute Numbers</option>
-                        <option value="percent">100% Stacked (Percentage)</option>
-                    </select>
-                </div>
+                    
+                    <label class="flex items-center cursor-pointer mb-3">
+                        <input type="checkbox" id="percentToggle" class="w-5 h-5 text-purple-600 rounded focus:ring-purple-500 mr-3" onchange="updateDashboard()">
+                        <div>
+                            <div class="text-sm font-bold text-gray-800">100% Stacked (Percentage)</div>
+                            <div class="text-xs text-gray-500">View as proportion of total</div>
+                        </div>
+                    </label>
 
-                <div class="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                    <label class="flex items-center cursor-pointer">
+                    <label class="flex items-center cursor-pointer mb-3 border-t border-gray-200 pt-3">
+                        <input type="checkbox" id="cumulativeToggle" class="w-5 h-5 text-purple-600 rounded focus:ring-purple-500 mr-3" onchange="updateDashboard()">
+                        <div>
+                            <div class="text-sm font-bold text-gray-800">Cumulative Values</div>
+                            <div class="text-xs text-gray-500">Accumulate totals over gameweeks</div>
+                        </div>
+                    </label>
+
+                    <label class="flex items-center cursor-pointer border-t border-gray-200 pt-3">
                         <input type="checkbox" id="includeBench" class="w-5 h-5 text-purple-600 rounded focus:ring-purple-500 mr-3" onchange="updateDashboard()">
                         <div>
                             <div class="text-sm font-bold text-gray-800">Include Bench Players</div>
@@ -177,19 +186,46 @@
             "xGC": "Expected Goals Conceded"
         };
 
-        // Pre-defined vivid colors for clean charting
+        // Master FPL Team Hex Colors
+        const TEAM_COLORS = {
+            "Arsenal": "#EF0107",
+            "Aston Villa": "#670E36",
+            "Bournemouth": "#B50E12",
+            "Brentford": "#E30613",
+            "Brighton": "#0057B8",
+            "Chelsea": "#034694",
+            "Crystal Palace": "#1B458F",
+            "Everton": "#003399",
+            "Fulham": "#111111",
+            "Ipswich": "#001F60",
+            "Leeds": "#FFCD00",
+            "Leicester": "#003090",
+            "Liverpool": "#C8102E",
+            "Man City": "#6CABDD",
+            "Man Utd": "#DA291C",
+            "Newcastle": "#333333",
+            "Nott'm Forest": "#E53233",
+            "Southampton": "#D71920",
+            "Spurs": "#132257",
+            "Sunderland": "#FF0000",
+            "West Ham": "#7A263A",
+            "Wolves": "#FDB913"
+        };
+
+        // Fallback colors for non-team categories (Positions, etc.)
         const PALETTE = [
             '#00FF87', '#37003C', '#E3004F', '#00E0FF', '#FF8A00', 
             '#02894E', '#800080', '#005BBB', '#D3A300', '#FF005A',
-            '#4A5568', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981',
-            '#3B82F6', '#EF4444', '#14B8A6', '#F97316', '#6366F1'
+            '#4A5568', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981'
         ];
 
         const STATE = {
             squads: [],
             names: {},
+            playerToTeam: {}, // Maps 'Saka' -> 'Arsenal'
             maxGW: 38,
-            colorMap: {} // Maps specific categories to consistent colors
+            colorMap: {}, // Resets on each update
+            teamPlayerCount: {} // Tracks how many players from a team are mapped so we can offset colors
         };
 
         let chartInstance1 = null;
@@ -229,6 +265,11 @@
                         STATE.squads.forEach(r => {
                             let w = parseInt(r['Week'] || r['GW']);
                             if(w > maxWeek) maxWeek = w;
+
+                            // Map players to their teams for the dynamic color logic
+                            if (r['Player'] && r['Team']) {
+                                STATE.playerToTeam[r['Player'].trim()] = r['Team'].trim();
+                            }
                         });
                         STATE.maxGW = maxWeek || 38;
 
@@ -257,20 +298,17 @@
             document.getElementById('loadingStatus').style.display = 'none';
             document.getElementById('appContent').classList.remove('hidden');
 
-            // Populate Profile Dropdowns
             const p1 = document.getElementById('profile1Select');
             const p2 = document.getElementById('profile2Select');
             
-            // Extract unique IDs present in the squads data
             const availableIds = [...new Set(STATE.squads.map(r => String(r['Profile ID'] || r['Profile_ID'] || r['ID']).trim()))].filter(id => id);
             
-            availableIds.forEach((id, index) => {
+            availableIds.forEach((id) => {
                 const name = STATE.names[id] || `Manager ${id}`;
                 p1.appendChild(new Option(name, id));
                 p2.appendChild(new Option(name, id));
             });
 
-            // Make sure P2 defaults to the second person if available
             if (p2.options.length > 1) p2.selectedIndex = 1;
 
             const slider = document.getElementById('gwSlider');
@@ -290,13 +328,46 @@
             updateDashboard();
         }
 
-        // Color generator for dynamic categories (like Players or Teams)
-        function getColorForCategory(category) {
-            if (!STATE.colorMap[category]) {
-                const colorIdx = Object.keys(STATE.colorMap).length % PALETTE.length;
-                STATE.colorMap[category] = PALETTE[colorIdx];
+        // Smart color assignment based on Premier League team identities
+        function getColorForCategory(cat, groupBy) {
+            if (STATE.colorMap[cat]) return STATE.colorMap[cat];
+
+            let baseColor = null;
+
+            if (groupBy === 'Team') {
+                // Fuzzy match the team
+                let matchedTeam = Object.keys(TEAM_COLORS).find(t => cat.toLowerCase().includes(t.toLowerCase()) || t.toLowerCase().includes(cat.toLowerCase()));
+                if (matchedTeam) baseColor = TEAM_COLORS[matchedTeam];
+            } 
+            else if (groupBy === 'Player') {
+                let team = STATE.playerToTeam[cat];
+                if (team) {
+                    let matchedTeam = Object.keys(TEAM_COLORS).find(t => team.toLowerCase().includes(t.toLowerCase()) || t.toLowerCase().includes(team.toLowerCase()));
+                    if (matchedTeam) {
+                        // We found their team! Track how many players from this team we've assigned
+                        STATE.teamPlayerCount[matchedTeam] = (STATE.teamPlayerCount[matchedTeam] || 0) + 1;
+                        let count = STATE.teamPlayerCount[matchedTeam] - 1;
+                        
+                        // Apply a deterministic shading offset to avoid duplicate colors
+                        const offsets = [0, 40, -40, 80, -80, 20, -20, 60, -60, 100, -100];
+                        let amount = offsets[count % offsets.length];
+                        
+                        // Shift RGB values up or down by the offset
+                        baseColor = '#' + TEAM_COLORS[matchedTeam].replace(/^#/, '').replace(/../g, hex => 
+                            ('0' + Math.min(255, Math.max(0, parseInt(hex, 16) + amount)).toString(16)).substr(-2)
+                        );
+                    }
+                }
             }
-            return STATE.colorMap[category];
+
+            if (!baseColor) {
+                // Fallback for Positions, Categories, or Unknown teams
+                const colorIdx = Object.keys(STATE.colorMap).length % PALETTE.length;
+                baseColor = PALETTE[colorIdx];
+            }
+
+            STATE.colorMap[cat] = baseColor;
+            return baseColor;
         }
 
         // --- 4. DATA AGGREGATION & CHARTING ---
@@ -312,19 +383,24 @@
             const p2Name = STATE.names[profile2] || `Manager ${profile2}`;
 
             const metricKey = document.getElementById('metricSelect').value;
+            const metricName = METRICS[metricKey];
             const groupBy = document.getElementById('groupBySelect').value;
-            const displayMode = document.getElementById('displayMode').value;
+            
+            const isPercent = document.getElementById('percentToggle').checked;
+            const isCumulative = document.getElementById('cumulativeToggle').checked;
             const includeBench = document.getElementById('includeBench').checked;
 
-            // UI Titles
             document.getElementById('chartTitle').innerText = `${p1Name} vs ${p2Name}`;
-            document.getElementById('chartSubtitle').innerText = `${METRICS[metricKey]} | Grouped by ${groupBy} | GW ${startGW}-${endGW}`;
+            document.getElementById('chartSubtitle').innerText = `${metricName} | Grouped by ${groupBy} | GW ${startGW}-${endGW}`;
 
-            // Data Structure: agg[gameweek][profileId][category] = value
+            // Reset dynamic color mapping for this specific chart execution
+            STATE.colorMap = {};
+            STATE.teamPlayerCount = {};
+
             const agg = {};
-            const gwTotals = {}; // Used for percentage calculations
+            const gwTotals = {};
 
-            for (let gw = startGW; gw <= endGW; gw++) {
+            for (let gw = 1; gw <= endGW; gw++) {
                 agg[gw] = { [profile1]: {}, [profile2]: {} };
                 gwTotals[gw] = { [profile1]: 0, [profile2]: 0 };
             }
@@ -340,22 +416,20 @@
                 let gw = parseInt(gwStr);
                 let id = String(idRaw).trim();
                 
-                if (gw >= startGW && gw <= endGW && (id === profile1 || id === profile2)) {
-                    if (!includeBench && String(row['Starter/Sub']) !== 'Starter') return;
+                if (gw >= 1 && gw <= endGW && (id === profile1 || id === profile2)) {
+                    if (!includeBench && String(row['Starter/Sub']).trim() !== 'Starter') return;
 
                     let cat = (row[groupBy] || "Unknown").trim();
                     let val = parseFloat(row[metricKey]);
                     
                     if (!isNaN(val)) {
-                        uniqueCategories.add(cat);
+                        if (gw >= startGW) uniqueCategories.add(cat);
                         agg[gw][id][cat] = (agg[gw][id][cat] || 0) + val;
                         gwTotals[gw][id] += val;
                     }
                 }
             });
 
-            // Build Chart.js Datasets
-            // Now we build two entirely separate arrays of datasets.
             const datasets1 = [];
             const datasets2 = [];
             const labels = [];
@@ -364,48 +438,78 @@
                 labels.push(`GW ${gw}`);
             }
 
-            // Calculate combined total values for each category to sort them (biggest at the bottom)
+            // Calculate totals for sorting categories descending (Largest values at the bottom of the stack)
             const categoryTotals = {};
             Array.from(uniqueCategories).forEach(cat => {
                 categoryTotals[cat] = 0;
                 for (let gw = startGW; gw <= endGW; gw++) {
-                    categoryTotals[cat] += (agg[gw][profile1][cat] || 0) + (agg[gw][profile2][cat] || 0);
+                    let val1 = 0, val2 = 0;
+                    if (isCumulative) {
+                        for(let g=1; g<=gw; g++) {
+                            val1 += (agg[g][profile1][cat] || 0);
+                            val2 += (agg[g][profile2][cat] || 0);
+                        }
+                    } else {
+                        val1 = (agg[gw][profile1][cat] || 0);
+                        val2 = (agg[gw][profile2][cat] || 0);
+                    }
+                    categoryTotals[cat] += val1 + val2;
                 }
             });
 
-            // Sort categories descending by total value (Chart.js draws the first array item at the bottom)
-            const sortedCategories = Array.from(uniqueCategories).sort((a, b) => categoryTotals[b] - categoryTotals[a]);
+            // Filter out categories that are 0 in the viewed window and sort descending
+            const activeCategories = Array.from(uniqueCategories).filter(cat => categoryTotals[cat] > 0);
+            const sortedCategories = activeCategories.sort((a, b) => categoryTotals[b] - categoryTotals[a]);
 
-            // Iterate over ALL sorted categories across BOTH profiles so colors and stack order match perfectly
             sortedCategories.forEach(cat => {
-                const color = getColorForCategory(cat);
+                const color = getColorForCategory(cat, groupBy);
 
-                // Profile 1 Dataset for this category
+                // Profile 1 Dataset
                 datasets1.push({
                     label: cat, 
                     data: labels.map((_, i) => {
-                        let gw = startGW + i;
-                        let rawVal = agg[gw][profile1][cat] || 0;
-                        if (displayMode === 'percent' && gwTotals[gw][profile1] > 0) {
-                            return (rawVal / gwTotals[gw][profile1]) * 100;
+                        let currentGW = startGW + i;
+                        let val = 0;
+                        let total = 0;
+
+                        if (isCumulative) {
+                            for (let g = 1; g <= currentGW; g++) {
+                                val += (agg[g][profile1][cat] || 0);
+                                total += gwTotals[g][profile1];
+                            }
+                        } else {
+                            val = agg[currentGW][profile1][cat] || 0;
+                            total = gwTotals[currentGW][profile1];
                         }
-                        return rawVal;
+
+                        if (isPercent && total > 0) return (val / total) * 100;
+                        return val;
                     }),
                     backgroundColor: color,
                     borderColor: '#ffffff',
                     borderWidth: 1
                 });
 
-                // Profile 2 Dataset for this category
+                // Profile 2 Dataset
                 datasets2.push({
                     label: cat,
                     data: labels.map((_, i) => {
-                        let gw = startGW + i;
-                        let rawVal = agg[gw][profile2][cat] || 0;
-                        if (displayMode === 'percent' && gwTotals[gw][profile2] > 0) {
-                            return (rawVal / gwTotals[gw][profile2]) * 100;
+                        let currentGW = startGW + i;
+                        let val = 0;
+                        let total = 0;
+
+                        if (isCumulative) {
+                            for (let g = 1; g <= currentGW; g++) {
+                                val += (agg[g][profile2][cat] || 0);
+                                total += gwTotals[g][profile2];
+                            }
+                        } else {
+                            val = agg[currentGW][profile2][cat] || 0;
+                            total = gwTotals[currentGW][profile2];
                         }
-                        return rawVal;
+
+                        if (isPercent && total > 0) return (val / total) * 100;
+                        return val;
                     }),
                     backgroundColor: color,
                     borderColor: '#ffffff',
@@ -413,22 +517,20 @@
                 });
             });
 
-            // Update individual chart titles
             document.getElementById('chartTitle1').innerText = p1Name;
             document.getElementById('chartTitle2').innerText = p2Name;
 
-            renderH2HCharts(labels, datasets1, datasets2, displayMode);
+            renderH2HCharts(labels, datasets1, datasets2, metricName, isPercent);
         }
 
-        function renderH2HCharts(labels, datasets1, datasets2, displayMode) {
-            // Destroy existing charts to prevent overlap
+        function renderH2HCharts(labels, datasets1, datasets2, metricName, isPercent) {
             if (chartInstance1) chartInstance1.destroy();
             if (chartInstance2) chartInstance2.destroy();
 
             Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
             
-            // Reusable config options to keep both charts identical
-            const commonOptions = {
+            // Base config for both charts
+            const getBaseOptions = () => ({
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: {
@@ -437,11 +539,8 @@
                     intersect: false
                 },
                 plugins: {
-                    legend: {
-                        position: 'right',
-                        labels: { boxWidth: 15 } // Standard legend since charts are separated now
-                    },
                     tooltip: {
+                        itemSort: (a, b) => b.parsed.y - a.parsed.y, // Sort tooltip descending by value
                         backgroundColor: 'rgba(55, 0, 60, 0.95)',
                         titleFont: { size: 14, weight: 'bold' },
                         bodyFont: { size: 13 },
@@ -451,7 +550,7 @@
                             label: function(context) {
                                 let val = context.parsed.y;
                                 if (val === 0) return null; // Hide 0s in tooltip
-                                let formattedVal = displayMode === 'percent' ? val.toFixed(1) + '%' : parseFloat(val.toFixed(2));
+                                let formattedVal = isPercent ? val.toFixed(1) + '%' : parseFloat(val.toFixed(2));
                                 return `${context.dataset.label}: ${formattedVal}`;
                             }
                         }
@@ -465,30 +564,51 @@
                     y: {
                         stacked: true,
                         beginAtZero: true,
-                        max: displayMode === 'percent' ? 100 : undefined,
+                        max: isPercent ? 100 : undefined,
                         title: {
                             display: true,
-                            text: displayMode === 'percent' ? '% Breakdown' : 'Absolute Value',
+                            text: metricName, // Use dropdown metric name
                             font: { weight: 'bold' }
                         }
                     }
                 }
-            };
+            });
 
-            // Draw Chart 1
+            // Draw Chart 1 (WITH unified legend)
+            const options1 = getBaseOptions();
+            options1.plugins.legend = {
+                position: 'right',
+                labels: { boxWidth: 15 },
+                onClick: function(e, legendItem, legend) {
+                    const index = legendItem.datasetIndex;
+                    if (chartInstance1.isDatasetVisible(index)) {
+                        chartInstance1.hide(index);
+                        if (chartInstance2) chartInstance2.hide(index);
+                        legendItem.hidden = true;
+                    } else {
+                        chartInstance1.show(index);
+                        if (chartInstance2) chartInstance2.show(index);
+                        legendItem.hidden = false;
+                    }
+                }
+            };
+            
             const ctx1 = document.getElementById('chart1').getContext('2d');
             chartInstance1 = new Chart(ctx1, {
                 type: 'bar',
                 data: { labels: labels, datasets: datasets1 },
-                options: commonOptions
+                options: options1
             });
 
-            // Draw Chart 2
+            // Draw Chart 2 (HIDDEN legend, relies on Chart 1's legend)
+            const options2 = getBaseOptions();
+            options2.plugins.legend = { display: false };
+
             const ctx2 = document.getElementById('chart2').getContext('2d');
             chartInstance2 = new Chart(ctx2, {
                 type: 'bar',
                 data: { labels: labels, datasets: datasets2 },
-                options: commonOptions
+                options: options2
             });
         }
 
